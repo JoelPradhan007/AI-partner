@@ -29,6 +29,7 @@ def fetch_recent_emails(credentials, max_results: int = 10) -> str:
             h = {x["name"]: x["value"] for x in full["payload"].get("headers", [])}
             lines.append(
                 f"• From: {h.get('From','?')} | Subject: {h.get('Subject','(none)')} | {h.get('Date','?')}\n"
+                f"  Link: https://mail.google.com/mail/u/0/#all/{m['id']}\n"
                 f"  Preview: {full.get('snippet','')[:120]}"
             )
         return "\n".join(lines)
@@ -43,7 +44,7 @@ def fetch_recent_drive_files(credentials, max_results: int = 10) -> str:
         resp = svc.files().list(
             pageSize=max_results,
             orderBy="modifiedTime desc",
-            fields="files(name,mimeType,modifiedTime)",
+            fields="files(id,name,mimeType,modifiedTime,webViewLink)",
         ).execute()
         files = resp.get("files", [])
         if not files:
@@ -51,7 +52,8 @@ def fetch_recent_drive_files(credentials, max_results: int = 10) -> str:
 
         lines = ["=== Recent Drive Files ==="]
         for f in files:
-            lines.append(f"• {f['name']} — modified {f.get('modifiedTime','?')[:10]}")
+            link = f.get('webViewLink') or f"https://drive.google.com/file/d/{f.get('id')}/view"
+            lines.append(f"• {f['name']} — modified {f.get('modifiedTime','?')[:10]} | Link: {link}")
         return "\n".join(lines)
     except Exception as e:
         logger.warning("Drive error: %s", e)
@@ -73,7 +75,9 @@ def fetch_upcoming_events(credentials, max_results: int = 10) -> str:
         lines = ["=== Upcoming Calendar Events ==="]
         for e in events:
             start = e["start"].get("dateTime", e["start"].get("date", "?"))
-            lines.append(f"• {e.get('summary','(no title)')} — {start[:16]}")
+            link = e.get('htmlLink', '')
+            link_str = f" | Link: {link}" if link else ""
+            lines.append(f"• {e.get('summary','(no title)')} — {start[:16]}{link_str}")
         return "\n".join(lines)
     except Exception as e:
         logger.warning("Calendar error: %s", e)

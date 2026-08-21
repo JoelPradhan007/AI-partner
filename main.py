@@ -1,14 +1,13 @@
-"""
-main.py — Workspace AI FastAPI application
-All routes, middleware, and startup in one file.
-"""
 import asyncio
+import contextvars
 import json
 import logging
+import re
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,26 +28,142 @@ from oauth import (
 )
 from workspace_fetcher import build_workspace_context
 
-logging.basicConfig(level=logging.INFO)
-logger   = logging.getLogger(__name__)
 settings = get_settings()
+
+# Directory for user workspace data / chat history
+USER_DATA_DIR = Path("user_data")
+USER_DATA_DIR.mkdir(exist_ok=True)
+
+# Directory for live runtime server logs per user
+INFO_HISTORY_DIR = Path("info_history")
+INFO_HISTORY_DIR.mkdir(exist_ok=True)
+
+current_user_email: contextvars.ContextVar[str] = contextvars.ContextVar("current_user_email", default="")
+last_known_user_email: str = ""
+
+
+class UserLogFileHandler(logging.Handler):
+    """
+    Directs live runtime server logs directly into info_history/<user_email>.txt.
+    Never creates server.log.
+    """
+    def __init__(self, base_dir: Path):
+        super().__init__()
+        self.base_dir = base_dir
+        self.base_dir.mkdir(exist_ok=True)
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            global last_known_user_email
+            email = current_user_email.get() or last_known_user_email
+            if not email:
+                return  # Never create server.log
+
+            msg = self.format(record)
+            safe_name = re.sub(r'[^a-zA-Z0-9_.@-]', '_', email)
+            log_file = self.base_dir / f"{safe_name}.txt"
+
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except Exception:
+            self.handleError(record)
+
+
+log_formatter = logging.Formatter(
+    "[%(asctime)s UTC] [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+file_handler = UserLogFileHandler(INFO_HISTORY_DIR)
+file_handler.setFormatter(log_formatter)
+file_handler.setLevel(logging.INFO)
+
+root_logger = logging.getLogger()
+root_logger.addHandler(file_handler)
+
+logger = logging.getLogger(__name__)
+
+
+# Track last logged workspace snapshot per user to avoid duplicate dumps
+_last_logged_workspace_snapshots: dict[str, str] = {}
+
+
+def log_user_data(user: User, workspace_context: str = "", user_text: str = "", assistant_text: str = ""):
+    """Save clean chat interactions and updated workspace data to user_data/<email>.txt"""
+    try:
+        identifier = user.email or f"user_{user.id}"
+        safe_name = re.sub(r'[^a-zA-Z0-9_.@-]', '_', identifier)
+        file_path = USER_DATA_DIR / f"{safe_name}.txt"
+
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        entry = [
+            f"\n{'='*70}",
+            f"TIMESTAMP: {timestamp}",
+            f"USER: {user.display_name or 'User'} ({user.email})",
+        ]
+
+        # Only log workspace snapshot when it is new or changed, avoiding repeating 60+ lines on every message
+        if workspace_context and workspace_context != "(Google account not linked)":
+            prev_snapshot = _last_logged_workspace_snapshots.get(identifier)
+            if prev_snapshot != workspace_context:
+                _last_logged_workspace_snapshots[identifier] = workspace_context
+                entry.append(f"\n[WORKSPACE DATA SNAPSHOT (UPDATED)]:\n{workspace_context}")
+
+        if user_text:
+            entry.append(f"\n[USER QUESTION]:\n{user_text}")
+        if assistant_text:
+            entry.append(f"\n[AI RESPONSE]:\n{assistant_text}")
+        entry.append(f"{'='*70}\n")
+
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(entry))
+    except Exception as e:
+        logger.warning("Failed to save user data file: %s", e)
 
 
 # ── Startup / shutdown ────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    server_log = INFO_HISTORY_DIR / "server.log"
+    if server_log.exists():
+        try:
+            server_log.unlink()
+        except Exception:
+            pass
     logger.info("Database ready.")
     yield
 
 app = FastAPI(title="Workspace AI", lifespan=lifespan)
+
+# Normalize 127.0.0.1 to localhost so OAuth matches the callback domain
+@app.middleware("http")
+async def normalize_domain_middleware(request: Request, call_next):
+    host = request.url.hostname
+    if host == "127.0.0.1" and "localhost" in settings.google_redirect_uri:
+        normalized_url = request.url.replace(hostname="localhost")
+        return RedirectResponse(str(normalized_url), status_code=status.HTTP_302_FOUND)
+    return await call_next(request)
+
+# Set user context for live log routing to info_history/<email>.txt
+@app.middleware("http")
+async def user_logging_context_middleware(request: Request, call_next):
+    global last_known_user_email
+    email = request.session.get("user_email", "")
+    if email:
+        last_known_user_email = email
+    token = current_user_email.set(email)
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        current_user_email.reset(token)
 
 # Session middleware — Authlib needs this to store OAuth state
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.app_secret_key,
     same_site="lax",
-    https_only=False,   # set True in production behind HTTPS
+    https_only=False, 
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -58,6 +173,7 @@ templates = Jinja2Templates(directory="templates")
 # ── Auth helpers ──────────────────────────────────────────────────
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
+    global last_known_user_email
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -65,6 +181,10 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     user   = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.email:
+        request.session["user_email"] = user.email
+        last_known_user_email = user.email
+        current_user_email.set(user.email)
     return user
 
 
@@ -73,8 +193,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     if request.session.get("user_id"):
-        return RedirectResponse("/chat")
-    return RedirectResponse("/login")
+        return RedirectResponse("/chat", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse("/login", status_code=status.HTTP_302_FOUND)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -107,7 +227,7 @@ async def auth_callback(request: Request, db: AsyncSession = Depends(get_db)):
             userinfo = await oauth.google.userinfo(token=token)
     except Exception as exc:
         logger.exception("OAuth callback failed: %s", exc)
-        return RedirectResponse("/login?error=oauth_failed")
+        return RedirectResponse("/login?error=oauth_failed", status_code=status.HTTP_302_FOUND)
 
     google_id    = userinfo["sub"]
     email        = userinfo["email"]
@@ -135,18 +255,21 @@ async def auth_callback(request: Request, db: AsyncSession = Depends(get_db)):
         )
         db.add(user)
 
-    await db.commit()
     await db.refresh(user)
 
+    global last_known_user_email
     request.session["user_id"] = user.id
+    request.session["user_email"] = user.email
+    last_known_user_email = user.email
+    current_user_email.set(user.email)
     logger.info("User %s logged in.", email)
-    return RedirectResponse("/chat")
+    return RedirectResponse("/chat", status_code=status.HTTP_302_FOUND)
 
 
 @app.get("/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/login")
+    return RedirectResponse("/login", status_code=status.HTTP_302_FOUND)
 
 
 # ── Chat UI ───────────────────────────────────────────────────────
@@ -167,7 +290,7 @@ async def chat_index(request: Request, db: AsyncSession = Depends(get_db),
         db.add(conv)
         await db.commit()
         await db.refresh(conv)
-    return RedirectResponse(f"/chat/{conv.id}")
+    return RedirectResponse(f"/chat/{conv.id}", status_code=status.HTTP_302_FOUND)
 
 
 @app.get("/chat/{conv_id}", response_class=HTMLResponse)
@@ -216,6 +339,8 @@ async def new_conversation(
     await db.commit()
     await db.refresh(conv)
     return {"id": conv.id, "title": conv.title}
+
+
 
 
 class SendMessageRequest(BaseModel):
@@ -338,5 +463,8 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
             if conv_update:
                 conv_update.updated_at = datetime.now(timezone.utc)
             await save_session.commit()
+
+        # Log workspace context and conversation to user file
+        log_user_data(user, workspace_context=workspace_context, user_text=user_text, assistant_text=complete)
 
     return StreamingResponse(stream_gemini(), media_type="text/plain; charset=utf-8")

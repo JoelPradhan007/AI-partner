@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # App
-    app_secret_key: str = "change-me-in-production"
+    app_secret_key: str = ""
     debug: bool = True
 
     # Google OAuth

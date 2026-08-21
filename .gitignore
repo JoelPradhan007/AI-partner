@@ -1,9 +1,36 @@
-.env
-.venv/
+# Python bytecode and cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Environments and Package Managers
+.venv/
+venv/
+ENV/
+env/
+dist/
+build/
+*.egg-info/
+
+# Configuration, Secrets, and API Keys
+.env
+*.env
+secret_key.key
+
+# Databases and User Data
 *.db
 *.sqlite
 *.sqlite3
+user_data/
+info_history/
+
+# Operating System Files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE Configurations (Optional but recommended)
 .vscode/
-*.log
+.idea/
