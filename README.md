@@ -1,4 +1,4 @@
-# Workspace AI — FastAPI Edition
+# Workspace AI — FastAPI
 
 Personal AI chatbot grounded in your live Gmail, Drive, and Calendar data.
 Uses **Authlib** for OAuth (solves the "missing OAuth state" bug permanently),
