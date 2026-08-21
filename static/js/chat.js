@@ -129,11 +129,27 @@ newChatBtn?.addEventListener('click', async () => {
   } catch (e) { console.error(e); }
 });
 
-// ── Sidebar toggle (mobile) ────────────────────────
-sidebarToggle?.addEventListener('click', () => sidebar.classList.toggle('sidebar--open'));
-document.addEventListener('click', e => {
-  if (!sidebar.contains(e.target) && !sidebarToggle?.contains(e.target))
-    sidebar.classList.remove('sidebar--open');
+
+// ── Sidebar toggle ─────────────────────────────────
+const appEl = document.querySelector('.app');
+
+sidebarToggle?.addEventListener('click', () => {
+  if (window.innerWidth <= 768) {
+    // Mobile: slide-in overlay
+    sidebar.classList.toggle('sidebar--open');
+  } else {
+    // Desktop: collapse/expand grid column
+    appEl.classList.toggle('sidebar-collapsed');
+  }
 });
+
+document.addEventListener('click', e => {
+  // Mobile only: close sidebar when clicking outside
+  if (window.innerWidth <= 768) {
+    if (!sidebar.contains(e.target) && !sidebarToggle?.contains(e.target))
+      sidebar.classList.remove('sidebar--open');
+  }
+});
+
 
 scrollBottom();
