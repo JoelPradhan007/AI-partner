@@ -1,107 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ conversation.title }} — Workspace AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Syne+Mono&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Syne+Mono&family=Lora:ital,wght@0,400;0,500;1,400&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
+
 <body>
 
-<div class="app">
+  <div class="app">
 
-  <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar__head">
-      <div class="wordmark wordmark--sm">
-        <span class="wordmark__glyph">◈</span>
-        <span class="wordmark__text">Workspace<em>AI</em></span>
-      </div>
-      <button class="icon-btn" id="newChatBtn" title="New chat">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
-    </div>
-
-    <div class="sidebar__body">
-      <p class="sidebar__label">Recents</p>
-      <ul class="conv-list">
-        {% for conv in conversations %}
-        <li class="conv-item {% if conv.id == conversation.id %}active{% endif %}">
-          <a href="/chat/{{ conv.id }}">{{ conv.title[:40] }}{% if conv.title|length > 40 %}…{% endif %}</a>
-        </li>
-        {% endfor %}
-      </ul>
-    </div>
-
-    <div class="sidebar__foot">
-      {% if user.avatar_url %}
-        <img class="avatar" src="{{ user.avatar_url }}" alt="{{ user.display_name }}">
-      {% else %}
-        <div class="avatar avatar--initial">{{ (user.display_name or user.email)[0].upper() }}</div>
-      {% endif %}
-      <span class="sidebar__username">{{ user.display_name or user.email }}</span>
-      <a href="/logout" class="icon-btn icon-btn--muted" title="Sign out">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      </a>
-    </div>
-  </aside>
-
-  <!-- Main -->
-  <main class="chat-main">
-    <header class="chat-header">
-      <button class="icon-btn" id="sidebarToggle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="8" x2="21" y2="8"/><line x1="3" y1="16" x2="21" y2="16"/></svg>
-      </button>
-      <h1 class="chat-header__title" id="chatTitle">{{ conversation.title }}</h1>
-      <div class="live-badge"><span class="live-dot"></span>Live</div>
-    </header>
-
-    <div class="messages" id="messages">
-      {% if not messages %}
-      <div class="empty-state" id="emptyState">
-        <div class="empty-state__ring">◈</div>
-        <h2>Hello, {{ (user.display_name or user.email).split()[0] }}.</h2>
-        <p>Ask anything about your emails, documents, or calendar.</p>
-        <div class="chips">
-          <button class="chip" data-text="Summarize my most important emails from today.">Today's emails</button>
-          <button class="chip" data-text="What meetings do I have this week?">This week's meetings</button>
-          <button class="chip" data-text="What files have I worked on recently?">Recent files</button>
-          <button class="chip" data-text="Any urgent action items in my inbox?">Action items</button>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__head">
+        <div class="wordmark wordmark--sm">
+          <span class="wordmark__glyph">◈</span>
+          <span class="wordmark__text">Workspace<em>AI</em></span>
         </div>
+        <button class="icon-btn" id="newChatBtn" title="New chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
       </div>
-      {% else %}
+
+      <div class="sidebar__body">
+        <p class="sidebar__label">Recents</p>
+        <ul class="conv-list">
+          {% for conv in conversations %}
+          <li class="conv-item {% if conv.id == conversation.id %}active{% endif %}" id="conv-item-{{ conv.id }}">
+            <a href="/chat/{{ conv.id }}" class="conv-item__link">
+              <span class="conv-item__title">{{ conv.title[:38] }}{% if conv.title|length > 38 %}…{% endif %}</span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="sidebar__foot">
+        {% if user.avatar_url %}
+        <img class="avatar" src="{{ user.avatar_url }}" alt="{{ user.display_name }}">
+        {% else %}
+        <div class="avatar avatar--initial">{{ (user.display_name or user.email)[0].upper() }}</div>
+        {% endif %}
+        <span class="sidebar__username">{{ user.display_name or user.email }}</span>
+        <a href="/logout" class="icon-btn icon-btn--muted" title="Sign out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="chat-main">
+      <header class="chat-header">
+        <button class="icon-btn" id="sidebarToggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="8" x2="21" y2="8" />
+            <line x1="3" y1="16" x2="21" y2="16" />
+          </svg>
+        </button>
+        <h1 class="chat-header__title" id="chatTitle">{{ conversation.title }}</h1>
+        <div class="live-badge"><span class="live-dot"></span>Live</div>
+      </header>
+
+      <div class="messages" id="messages">
+        {% if not messages %}
+        <div class="empty-state" id="emptyState">
+          <div class="empty-state__ring">◈</div>
+          <h2>Hello, {{ (user.display_name or user.email).split()[0] }}.</h2>
+          <p>Ask anything about your emails, documents, or calendar.</p>
+          <div class="chips">
+            <button class="chip" data-text="Summarize my most important emails from today.">Today's emails</button>
+            <button class="chip" data-text="What meetings do I have this week?">This week's meetings</button>
+            <button class="chip" data-text="What files have I worked on recently?">Recent files</button>
+            <button class="chip" data-text="Any urgent action items in my inbox?">Action items</button>
+          </div>
+        </div>
+        {% else %}
         {% for msg in messages %}
         <div class="msg msg--{{ msg.role }}">
           <div class="msg__bubble">{{ msg.content | replace('\n', '<br>') | safe }}</div>
         </div>
         {% endfor %}
-      {% endif %}
-    </div>
-
-    <div class="composer">
-      <div class="composer__box" id="composerBox">
-        <textarea id="msgInput" placeholder="Ask about your workspace…" rows="1"></textarea>
-        <button class="send-btn" id="sendBtn" disabled>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-        </button>
+        {% endif %}
       </div>
-      <p class="composer__hint">
-        <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> newline · reads live workspace data
-      </p>
-    </div>
-  </main>
-</div>
 
-<script>
-  const CONV_ID   = {{ conversation.id }};
-  const SEND_URL  = "/api/chat/send";
-  const NEW_URL   = "/api/conversations";
-</script>
-<script src="/static/js/chat.js"></script>
+      <div class="composer">
+        <div class="composer__box" id="composerBox">
+          <textarea id="msgInput" placeholder="Ask about your workspace…" rows="1"></textarea>
+          <button class="send-btn" id="sendBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
+        <p class="composer__hint">
+          <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> newline · reads live workspace data
+        </p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const CONV_ID = parseInt("{{ conversation.id }}", 10);
+    const SEND_URL = "/api/chat/send";
+    const NEW_URL = "/api/conversations";
+  </script>
+  <script src="/static/js/chat.js"></script>
 </body>
+
 </html>
