@@ -255,6 +255,7 @@ async def auth_callback(request: Request, db: AsyncSession = Depends(get_db)):
         )
         db.add(user)
 
+    await db.commit()
     await db.refresh(user)
 
     global last_known_user_email
@@ -346,6 +347,7 @@ async def new_conversation(
 class SendMessageRequest(BaseModel):
     conversation_id: int
     message: str
+    web_search: bool = False
 
 
 @app.post("/api/chat/send")
@@ -427,14 +429,24 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
 
     async def stream_gemini():
         full_reply = []
+        grounding_chunks = []
         try:
             client = genai.Client(api_key=settings.gemini_api_key)
-            chat   = client.chats.create(
+
+            gen_config_kwargs = dict(
+                system_instruction=system_prompt,
+                temperature=0.7,
+            )
+            if body.web_search:
+                # Real-time Google Search grounding — same mechanism Gemini's
+                # own UI uses when its "Search" toggle is on.
+                gen_config_kwargs["tools"] = [
+                    genai_types.Tool(google_search=genai_types.GoogleSearch())
+                ]
+
+            chat = client.chats.create(
                 model=settings.gemini_model,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.7,
-                ),
+                config=genai_types.GenerateContentConfig(**gen_config_kwargs),
                 history=history,
             )
             # Run blocking stream in thread pool
@@ -446,6 +458,31 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
                 token = chunk.text or ""
                 full_reply.append(token)
                 yield token
+
+                # Grounding metadata typically arrives on the final chunk(s)
+                try:
+                    metadata = chunk.candidates[0].grounding_metadata
+                    if metadata and metadata.grounding_chunks:
+                        grounding_chunks = metadata.grounding_chunks
+                except (AttributeError, IndexError, TypeError):
+                    pass
+
+            # Append a de-duplicated source list, like Gemini's citation footer
+            if grounding_chunks:
+                seen = set()
+                lines = []
+                for gc in grounding_chunks:
+                    web = getattr(gc, "web", None)
+                    uri = getattr(web, "uri", None) if web else None
+                    title = getattr(web, "title", None) if web else None
+                    if not uri or uri in seen:
+                        continue
+                    seen.add(uri)
+                    lines.append(f"{len(seen)}. {title or uri} — {uri}")
+                if lines:
+                    sources_block = "\n\n---\nSources:\n" + "\n".join(lines)
+                    full_reply.append(sources_block)
+                    yield sources_block
 
         except Exception as exc:
             logger.exception("Gemini error: %s", exc)
