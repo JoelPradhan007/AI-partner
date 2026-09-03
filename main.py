@@ -18,6 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from google import genai
 from google.genai import types as genai_types
+from google.genai import errors as genai_errors
 
 from config import get_settings
 from database import init_db, get_db
@@ -430,42 +431,114 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
     async def stream_gemini():
         full_reply = []
         grounding_chunks = []
-        try:
-            client = genai.Client(api_key=settings.gemini_api_key)
+        client = genai.Client(api_key=settings.gemini_api_key)
 
-            gen_config_kwargs = dict(
-                system_instruction=system_prompt,
-                temperature=0.7,
-            )
-            if body.web_search:
-                # Real-time Google Search grounding — same mechanism Gemini's
-                # own UI uses when its "Search" toggle is on.
-                gen_config_kwargs["tools"] = [
-                    genai_types.Tool(google_search=genai_types.GoogleSearch())
-                ]
+        gen_config_kwargs = dict(
+            system_instruction=system_prompt,
+            temperature=0.7,
+        )
+        if body.web_search:
+            # Real-time Google Search grounding — same mechanism Gemini's
+            # own UI uses when its "Search" toggle is on.
+            gen_config_kwargs["tools"] = [
+                genai_types.Tool(google_search=genai_types.GoogleSearch())
+            ]
 
+        loop = asyncio.get_event_loop()
+
+        # ── Model fallback chain ────────────────────────────────────
+        # Try the primary model first (with a few retries for transient
+        # 503 overload). If it's still down, drop to each fallback model
+        # in turn — lighter/older models often have separate capacity
+        # pools and stay up even when the flagship model is saturated.
+        models_to_try = [settings.gemini_model] + list(settings.gemini_fallback_models)
+        RETRIES_PER_MODEL = 3
+        BACKOFF_SECONDS = [1, 2, 4]
+
+        stream = None
+        first_chunk = None
+        last_error = None
+        used_model = None
+        used_fallback = False
+
+        for model_idx, model_name in enumerate(models_to_try):
+            is_fallback = model_idx > 0
             chat = client.chats.create(
-                model=settings.gemini_model,
+                model=model_name,
                 config=genai_types.GenerateContentConfig(**gen_config_kwargs),
                 history=history,
             )
-            # Run blocking stream in thread pool
-            loop = asyncio.get_event_loop()
-            stream = await loop.run_in_executor(
-                None, lambda: chat.send_message_stream(user_text)
-            )
-            for chunk in stream:
-                token = chunk.text or ""
-                full_reply.append(token)
-                yield token
-
-                # Grounding metadata typically arrives on the final chunk(s)
+            for attempt in range(RETRIES_PER_MODEL):
                 try:
-                    metadata = chunk.candidates[0].grounding_metadata
-                    if metadata and metadata.grounding_chunks:
-                        grounding_chunks = metadata.grounding_chunks
-                except (AttributeError, IndexError, TypeError):
-                    pass
+                    stream = await loop.run_in_executor(
+                        None, lambda: chat.send_message_stream(user_text)
+                    )
+                    # Force the first chunk now so a 503 surfaces here,
+                    # inside the retry loop, rather than mid-stream below.
+                    first_chunk = await loop.run_in_executor(None, lambda: next(stream, None))
+                    last_error = None
+                    used_model = model_name
+                    used_fallback = is_fallback
+                    break
+                except genai_errors.ServerError as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Gemini overloaded on %s (attempt %d/%d): %s",
+                        model_name, attempt + 1, RETRIES_PER_MODEL, exc,
+                    )
+                    if attempt < RETRIES_PER_MODEL - 1:
+                        await asyncio.sleep(BACKOFF_SECONDS[attempt])
+                        continue
+                except Exception as exc:
+                    # Non-retryable, non-overload error — no point trying
+                    # other models, they'll fail the same way.
+                    last_error = exc
+                    logger.exception("Gemini error (non-retryable) on %s: %s", model_name, exc)
+                    break
+            if last_error is None:
+                break  # got a working stream, stop trying models
+            if not isinstance(last_error, genai_errors.ServerError):
+                break  # non-overload error, don't bother with fallbacks
+
+        if last_error is not None:
+            friendly = (
+                "⚠️ Gemini's servers are experiencing heavy load right now, "
+                "even on the backup models. Please try sending your message "
+                "again in a moment."
+                if isinstance(last_error, genai_errors.ServerError) else
+                f"⚠️ AI error: {last_error}"
+            )
+            full_reply.append(friendly)
+            yield friendly
+        else:
+            if used_fallback:
+                notice = f"_(Note: switched to {used_model} — the primary model was overloaded)_\n\n"
+                full_reply.append(notice)
+                yield notice
+            try:
+                # Yield the chunk we already pulled, then continue streaming
+                for chunk in ([first_chunk] if first_chunk is not None else []) + list(stream):
+                    token = chunk.text or ""
+                    full_reply.append(token)
+                    yield token
+
+                    try:
+                        metadata = chunk.candidates[0].grounding_metadata
+                        if metadata and metadata.grounding_chunks:
+                            grounding_chunks = metadata.grounding_chunks
+                    except (AttributeError, IndexError, TypeError):
+                        pass
+            except genai_errors.ServerError as exc:
+                # Went down mid-stream — don't retry (partial content already sent)
+                logger.warning("Gemini overloaded mid-stream on %s: %s", used_model, exc)
+                note = "\n\n⚠️ Connection to Gemini was interrupted (server overload). Please try again."
+                full_reply.append(note)
+                yield note
+            except Exception as exc:
+                logger.exception("Gemini error mid-stream: %s", exc)
+                error_msg = f"\n\n⚠️ AI error: {exc}"
+                full_reply.append(error_msg)
+                yield error_msg
 
             # Append a de-duplicated source list, like Gemini's citation footer
             if grounding_chunks:
@@ -483,12 +556,6 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
                     sources_block = "\n\n---\nSources:\n" + "\n".join(lines)
                     full_reply.append(sources_block)
                     yield sources_block
-
-        except Exception as exc:
-            logger.exception("Gemini error: %s", exc)
-            error_msg = f"\n\n⚠️ AI error: {exc}"
-            full_reply.append(error_msg)
-            yield error_msg
 
         # Persist assistant reply
         complete = "".join(full_reply)
