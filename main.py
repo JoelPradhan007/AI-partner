@@ -12,12 +12,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from google import genai
 from google.genai import types as genai_types
+from google.genai import errors as genai_errors
 
 from config import get_settings
 from database import init_db, get_db
@@ -101,7 +102,6 @@ def log_user_data(user: User, workspace_context: str = "", user_text: str = "", 
             f"USER: {user.display_name or 'User'} ({user.email})",
         ]
 
-        # Only log workspace snapshot when it is new or changed, avoiding repeating 60+ lines on every message
         if workspace_context and workspace_context != "(Google account not linked)":
             prev_snapshot = _last_logged_workspace_snapshots.get(identifier)
             if prev_snapshot != workspace_context:
@@ -144,7 +144,6 @@ async def normalize_domain_middleware(request: Request, call_next):
         return RedirectResponse(str(normalized_url), status_code=status.HTTP_302_FOUND)
     return await call_next(request)
 
-# Set user context for live log routing to info_history/<email>.txt
 @app.middleware("http")
 async def user_logging_context_middleware(request: Request, call_next):
     global last_known_user_email
@@ -255,6 +254,7 @@ async def auth_callback(request: Request, db: AsyncSession = Depends(get_db)):
         )
         db.add(user)
 
+    await db.commit()
     await db.refresh(user)
 
     global last_known_user_email
@@ -341,11 +341,38 @@ async def new_conversation(
     return {"id": conv.id, "title": conv.title}
 
 
+@app.delete("/api/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: int,
+    db:   AsyncSession = Depends(get_db),
+    user: User         = Depends(get_current_user),
+):
+    # Verify ownership before deletion
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conv_id,
+            Conversation.user_id == user.id,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete related messages first
+    await db.execute(
+        delete(Message).where(Message.conversation_id == conv_id)
+    )
+    # Delete conversation
+    await db.delete(conv)
+    await db.commit()
+
+    return {"status": "success", "deleted_id": conv_id}
 
 
 class SendMessageRequest(BaseModel):
     conversation_id: int
     message: str
+    web_search: bool = False
 
 
 @app.post("/api/chat/send")
@@ -427,31 +454,128 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
 
     async def stream_gemini():
         full_reply = []
-        try:
-            client = genai.Client(api_key=settings.gemini_api_key)
-            chat   = client.chats.create(
-                model=settings.gemini_model,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.7,
-                ),
+        grounding_chunks = []
+        client = genai.Client(api_key=settings.gemini_api_key)
+
+        gen_config_kwargs = dict(
+            system_instruction=system_prompt,
+            temperature=0.7,
+        )
+        if body.web_search:
+            # Real-time Google Search grounding — same mechanism Gemini's
+            # own UI uses when its "Search" toggle is on.
+            gen_config_kwargs["tools"] = [
+                genai_types.Tool(google_search=genai_types.GoogleSearch())
+            ]
+
+        loop = asyncio.get_event_loop()
+
+        # Model fallback chain
+        models_to_try = [settings.gemini_model] + list(settings.gemini_fallback_models)
+        RETRIES_PER_MODEL = 3
+        BACKOFF_SECONDS = [1, 2, 4]
+
+        stream = None
+        first_chunk = None
+        last_error = None
+        used_model = None
+        used_fallback = False
+
+        for model_idx, model_name in enumerate(models_to_try):
+            is_fallback = model_idx > 0
+            chat = client.chats.create(
+                model=model_name,
+                config=genai_types.GenerateContentConfig(**gen_config_kwargs),
                 history=history,
             )
-            # Run blocking stream in thread pool
-            loop = asyncio.get_event_loop()
-            stream = await loop.run_in_executor(
-                None, lambda: chat.send_message_stream(user_text)
-            )
-            for chunk in stream:
-                token = chunk.text or ""
-                full_reply.append(token)
-                yield token
+            for attempt in range(RETRIES_PER_MODEL):
+                try:
+                    stream = await loop.run_in_executor(
+                        None, lambda: chat.send_message_stream(user_text)
+                    )
+                    # Force the first chunk now so a 503 surfaces here,
+                    # inside the retry loop, rather than mid-stream below.
+                    first_chunk = await loop.run_in_executor(None, lambda: next(stream, None))
+                    last_error = None
+                    used_model = model_name
+                    used_fallback = is_fallback
+                    break
+                except genai_errors.ServerError as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Gemini overloaded on %s (attempt %d/%d): %s",
+                        model_name, attempt + 1, RETRIES_PER_MODEL, exc,
+                    )
+                    if attempt < RETRIES_PER_MODEL - 1:
+                        await asyncio.sleep(BACKOFF_SECONDS[attempt])
+                        continue
+                except Exception as exc:
+                    # Non-retryable, non-overload error — no point trying
+                    # other models, they'll fail the same way.
+                    last_error = exc
+                    logger.exception("Gemini error (non-retryable) on %s: %s", model_name, exc)
+                    break
+            if last_error is None:
+                break  # got a working stream, stop trying models
+            if not isinstance(last_error, genai_errors.ServerError):
+                break  # non-overload error, don't bother with fallbacks
 
-        except Exception as exc:
-            logger.exception("Gemini error: %s", exc)
-            error_msg = f"\n\n⚠️ AI error: {exc}"
-            full_reply.append(error_msg)
-            yield error_msg
+        if last_error is not None:
+            friendly = (
+                "⚠️ Gemini's servers are experiencing heavy load right now, "
+                "even on the backup models. Please try sending your message "
+                "again in a moment."
+                if isinstance(last_error, genai_errors.ServerError) else
+                f"⚠️ AI error: {last_error}"
+            )
+            full_reply.append(friendly)
+            yield friendly
+        else:
+            if used_fallback:
+                notice = f"_(Note: switched to {used_model} — the primary model was overloaded)_\n\n"
+                full_reply.append(notice)
+                yield notice
+            try:
+                # Yield the chunk we already pulled, then continue streaming
+                for chunk in ([first_chunk] if first_chunk is not None else []) + list(stream):
+                    token = chunk.text or ""
+                    full_reply.append(token)
+                    yield token
+
+                    try:
+                        metadata = chunk.candidates[0].grounding_metadata
+                        if metadata and metadata.grounding_chunks:
+                            grounding_chunks = metadata.grounding_chunks
+                    except (AttributeError, IndexError, TypeError):
+                        pass
+            except genai_errors.ServerError as exc:
+                # Went down mid-stream — don't retry (partial content already sent)
+                logger.warning("Gemini overloaded mid-stream on %s: %s", used_model, exc)
+                note = "\n\n⚠️ Connection to Gemini was interrupted (server overload). Please try again."
+                full_reply.append(note)
+                yield note
+            except Exception as exc:
+                logger.exception("Gemini error mid-stream: %s", exc)
+                error_msg = f"\n\n⚠️ AI error: {exc}"
+                full_reply.append(error_msg)
+                yield error_msg
+
+            # Append a de-duplicated source list, like Gemini's citation footer
+            if grounding_chunks:
+                seen = set()
+                lines = []
+                for gc in grounding_chunks:
+                    web = getattr(gc, "web", None)
+                    uri = getattr(web, "uri", None) if web else None
+                    title = getattr(web, "title", None) if web else None
+                    if not uri or uri in seen:
+                        continue
+                    seen.add(uri)
+                    lines.append(f"{len(seen)}. {title or uri} — {uri}")
+                if lines:
+                    sources_block = "\n\n---\nSources:\n" + "\n".join(lines)
+                    full_reply.append(sources_block)
+                    yield sources_block
 
         # Persist assistant reply
         complete = "".join(full_reply)

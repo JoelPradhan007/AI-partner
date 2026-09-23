@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
+    # Tried in order if the primary model is overloaded (503) or unavailable.
+    # Lighter/older models tend to have separate capacity, so they often
+    # stay up even when the flagship model is getting hammered.
+    gemini_fallback_models: list[str] = ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
 
     # DB
     database_url: str = "sqlite+aiosqlite:///./workspace_ai.db"
