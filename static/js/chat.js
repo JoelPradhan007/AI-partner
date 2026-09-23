@@ -1,7 +1,3 @@
-/* ═══════════════════════════════════════════════════
-   Workspace AI (FastAPI) — chat.js
-   ═══════════════════════════════════════════════════ */
-
 const messagesEl    = document.getElementById('messages');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
@@ -10,6 +6,17 @@ const chatTitle     = document.getElementById('chatTitle');
 const sidebar       = document.getElementById('sidebar');
 const sidebarToggle = document.getElementById('sidebarToggle');
 const emptyState    = document.getElementById('emptyState');
+const backdropEl    = document.getElementById('sidebarBackdrop');
+
+// ── Configure Marked Parser ────────────────────────
+if (typeof marked !== 'undefined') {
+  const renderer = new marked.Renderer();
+  renderer.link = function({ href, title, text }) {
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+  };
+  marked.use({ renderer });
+}
 
 // ── Utilities ──────────────────────────────────────
 function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
@@ -17,7 +24,13 @@ function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 function escHtml(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function nl2br(t) { return escHtml(t).replace(/\n/g,'<br>'); }
+
+function renderMarkdown(t) {
+  if (typeof marked !== 'undefined') {
+    return marked.parse(t);
+  }
+  return escHtml(t).replace(/\n/g, '<br>');
+}
 
 function appendMsg(role, html, streaming = false) {
   const wrap   = document.createElement('div');
@@ -39,6 +52,7 @@ function showThinking() {
   messagesEl.appendChild(wrap);
   scrollBottom();
 }
+
 function removeThinking() { document.getElementById('_thinking')?.remove(); }
 
 // ── Auto-grow textarea ─────────────────────────────
@@ -56,7 +70,7 @@ async function sendMessage() {
   if (!text) return;
 
   emptyState?.remove();
-  appendMsg('user', nl2br(text));
+  appendMsg('user', renderMarkdown(text));
 
   msgInput.value = '';
   msgInput.style.height = 'auto';
@@ -90,7 +104,7 @@ async function sendMessage() {
         removeThinking();
         bubble = appendMsg('assistant', '', true);
       }
-      bubble.innerHTML = nl2br(buffer);
+      bubble.innerHTML = renderMarkdown(buffer);
       scrollBottom();
     }
 
@@ -129,27 +143,63 @@ newChatBtn?.addEventListener('click', async () => {
   } catch (e) { console.error(e); }
 });
 
+// ── Delete Conversation ────────────────────────────
+document.querySelectorAll('.conv-item__delete').forEach(btn => {
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-// ── Sidebar toggle ─────────────────────────────────
+    const convId = btn.dataset.id;
+    if (!convId) return;
+
+    const confirmed = confirm("Are you sure you want to delete this chat?");
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/conversations/${convId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (res.ok) {
+        document.getElementById(`conv-item-${convId}`)?.remove();
+        
+        if (typeof CONV_ID !== 'undefined' && parseInt(convId, 10) === CONV_ID) {
+          window.location.href = '/chat';
+        }
+      } else {
+        alert("Failed to delete conversation.");
+      }
+    } catch (err) {
+      console.error("Error deleting conversation:", err);
+      alert("Error contacting server to delete chat.");
+    }
+  });
+});
+
+// ── Sidebar Toggle & Mobile Backdrop Logic ─────────
 const appEl = document.querySelector('.app');
+
+function closeMobileSidebar() {
+  sidebar.classList.remove('sidebar--open');
+  backdropEl?.classList.remove('active');
+}
 
 sidebarToggle?.addEventListener('click', () => {
   if (window.innerWidth <= 768) {
-    // Mobile: slide-in overlay
-    sidebar.classList.toggle('sidebar--open');
+    const isOpen = sidebar.classList.toggle('sidebar--open');
+    backdropEl?.classList.toggle('active', isOpen);
   } else {
-    // Desktop: collapse/expand grid column
     appEl.classList.toggle('sidebar-collapsed');
   }
 });
 
-document.addEventListener('click', e => {
-  // Mobile only: close sidebar when clicking outside
-  if (window.innerWidth <= 768) {
-    if (!sidebar.contains(e.target) && !sidebarToggle?.contains(e.target))
-      sidebar.classList.remove('sidebar--open');
-  }
-});
+backdropEl?.addEventListener('click', closeMobileSidebar);
 
+document.querySelectorAll('.conv-item__link').forEach(link => {
+  link.addEventListener('click', () => {
+    if (window.innerWidth <= 768) closeMobileSidebar();
+  });
+});
 
 scrollBottom();
