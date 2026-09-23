@@ -4,12 +4,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ conversation.title }} — Workspace AI</title>
+  <title>{{ conversation.title }} — Rounds</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
-    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Syne+Mono&family=Lora:ital,wght@0,400;0,500;1,400&display=swap"
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="/static/css/main.css">
+  
+  <!-- Markdown parser library -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 
 <body>
@@ -20,8 +23,12 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar__head">
         <div class="wordmark wordmark--sm">
-          <span class="wordmark__glyph">◈</span>
-          <span class="wordmark__text">Workspace<em>AI</em></span>
+          <span class="wordmark__glyph">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h4l2 7 4-14 2 7h8" />
+            </svg>
+          </span>
+          <span class="wordmark__text">Rounds</span>
         </div>
         <button class="icon-btn" id="newChatBtn" title="New chat">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -32,13 +39,19 @@
       </div>
 
       <div class="sidebar__body">
-        <p class="sidebar__label">Recents</p>
+        <p class="sidebar__label">Conversations</p>
         <ul class="conv-list">
           {% for conv in conversations %}
           <li class="conv-item {% if conv.id == conversation.id %}active{% endif %}" id="conv-item-{{ conv.id }}">
             <a href="/chat/{{ conv.id }}" class="conv-item__link">
               <span class="conv-item__title">{{ conv.title[:38] }}{% if conv.title|length > 38 %}…{% endif %}</span>
             </a>
+            <button class="conv-item__delete icon-btn icon-btn--muted" data-id="{{ conv.id }}" title="Delete chat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            </button>
           </li>
           {% endfor %}
         </ul>
@@ -61,6 +74,9 @@
       </div>
     </aside>
 
+    <!-- Overlay backdrop for mobile menu closing -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
     <!-- Main -->
     <main class="chat-main">
       <header class="chat-header">
@@ -71,26 +87,32 @@
           </svg>
         </button>
         <h1 class="chat-header__title" id="chatTitle">{{ conversation.title }}</h1>
-        <div class="live-badge"><span class="live-dot"></span>Live</div>
+        <div class="live-badge"><span class="live-dot"></span>Synced</div>
       </header>
 
       <div class="messages" id="messages">
         {% if not messages %}
         <div class="empty-state" id="emptyState">
-          <div class="empty-state__ring">◈</div>
+          <div class="empty-state__ring">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h4l2 7 4-14 2 7h8" />
+            </svg>
+          </div>
           <h2>Hello, {{ (user.display_name or user.email).split()[0] }}.</h2>
-          <p>Ask anything about your emails, documents, or calendar.</p>
+          <p>Ask about today's inbox, referral letters, documents, or your schedule.</p>
           <div class="chips">
-            <button class="chip" data-text="Summarize my most important emails from today.">Today's emails</button>
-            <button class="chip" data-text="What meetings do I have this week?">This week's meetings</button>
-            <button class="chip" data-text="What files have I worked on recently?">Recent files</button>
-            <button class="chip" data-text="Any urgent action items in my inbox?">Action items</button>
+            <button class="chip" data-text="Summarize my most important emails from today.">Today's inbox</button>
+            <button class="chip" data-text="What's on my calendar this week?">This week's schedule</button>
+            <button class="chip" data-text="What files have I worked on recently?">Recent documents</button>
+            <button class="chip" data-text="Anything urgent I still need to respond to?">Anything urgent?</button>
           </div>
         </div>
         {% else %}
         {% for msg in messages %}
         <div class="msg msg--{{ msg.role }}">
-          <div class="msg__bubble">{{ msg.content | replace('\n', '<br>') | safe }}</div>
+          <div class="msg__bubble" data-raw-content="{{ msg.content }}">
+            {{ msg.content }}
+          </div>
         </div>
         {% endfor %}
         {% endif %}
@@ -98,7 +120,7 @@
 
       <div class="composer">
         <div class="composer__box" id="composerBox">
-          <textarea id="msgInput" placeholder="Ask about your workspace…" rows="1"></textarea>
+          <textarea id="msgInput" placeholder="Ask about your inbox, documents, or schedule…" rows="1"></textarea>
           <button class="send-btn" id="sendBtn" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="22" y1="2" x2="11" y2="13" />
@@ -107,7 +129,7 @@
           </button>
         </div>
         <p class="composer__hint">
-          <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> newline · reads live workspace data
+          <kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> new line · reads your live inbox, files, and calendar
         </p>
       </div>
     </main>
@@ -117,6 +139,15 @@
     const CONV_ID = parseInt("{{ conversation.id }}", 10);
     const SEND_URL = "/api/chat/send";
     const NEW_URL = "/api/conversations";
+
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll(".msg__bubble[data-raw-content]").forEach(bubble => {
+        const raw = bubble.getAttribute("data-raw-content");
+        if (typeof marked !== "undefined" && raw) {
+          bubble.innerHTML = marked.parse(raw);
+        }
+      });
+    });
   </script>
   <script src="/static/js/chat.js"></script>
 </body>
