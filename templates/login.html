@@ -4,10 +4,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign In — Workspace AI</title>
+  <title>Sign In — Rounds</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
-    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Syne+Mono&family=Lora:ital,wght@0,400;0,500;1,400&display=swap"
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
@@ -17,24 +17,39 @@
   <div class="login-root">
 
     <div class="login-left">
-      <div class="noise-overlay"></div>
       <div class="login-left__inner">
-        <div class="wordmark">
-          <span class="wordmark__glyph">◈</span>
-          <span class="wordmark__text">Workspace<em>AI</em></span>
+        <div class="wordmark wordmark--light">
+          <span class="wordmark__glyph">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h4l2 7 4-14 2 7h8" />
+            </svg>
+          </span>
+          <span class="wordmark__text">Rounds</span>
         </div>
 
         <div class="login-hero">
-          <h1>Your work,<br><em>finally</em> understood.</h1>
-          <p>Connect Google and ask plain questions about your actual emails, files, and meetings — answered by Gemini
-            with live context.</p>
+          <h1>Caught up before you walk into the room.</h1>
+          <p>Connect your Google account and Check your actual inbox, documents, and
+            Schedule — Answered from what's really there, not a guess.</p>
         </div>
 
         <ul class="feature-list">
-          <li><span>01</span> Reads your Gmail inbox in real time</li>
-          <li><span>02</span> Surfaces recent Drive documents</li>
-          <li><span>03</span> Knows your upcoming calendar</li>
-          <li><span>04</span> Gemini 2.5 Flash — streaming responses</li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="m4 6 8 7 8-7"/></svg>
+            Reads your inbox as it updates — referrals, results, messages from colleagues
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            Finds documents and reports already saved to Drive
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Knows what's on today's and this week's calendar
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8z"/></svg>
+            Answers stream in real time, powered by Gemini
+          </li>
         </ul>
       </div>
     </div>
@@ -46,7 +61,8 @@
         {% endif %}
 
         <h2>Sign in</h2>
-        <p class="login-card__sub">We only <strong>read</strong> your Google data — never write.</p>
+        <p class="login-card__sub">Rounds only <strong>reads</strong> your Google data — it never sends email, edits
+          files, or changes your calendar.</p>
 
         <a href="/auth/google" class="btn-google">
           <svg class="g-icon" viewBox="0 0 24 24">
@@ -67,8 +83,8 @@
         </a>
 
         <p class="login-card__legal">
-          OAuth 2.0 · Read-only Gmail, Drive & Calendar ·
-          Tokens encrypted with Fernet before storage
+          Authenticated with OAuth 2.0, read-only across Gmail, Drive and Calendar. Tokens are encrypted before
+          they're stored.
         </p>
       </div>
     </div>
