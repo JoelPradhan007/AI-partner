@@ -925,8 +925,10 @@ ul {
 
 /* ── MOBILE ONLY STYLES (Max 768px) ────────────────────── */
 @media (max-width: 768px) {
+  /* Mobile Login Page Layout Fixes */
   .login-root {
     grid-template-columns: 1fr;
+    min-height: 100vh;
   }
 
   .login-left {
@@ -934,11 +936,37 @@ ul {
   }
 
   .login-right {
-    padding: 48px 24px;
-    align-items: flex-start;
-    padding-top: 80px;
+    padding: 32px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
   }
 
+  .login-card {
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
+  }
+
+  .login-card h2 {
+    font-size: 22px;
+    text-align: center;
+  }
+
+  .login-card__sub {
+    font-size: 13.5px;
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  .btn-google {
+    padding: 14px;
+    font-size: 15px;
+    border-radius: var(--radius);
+  }
+
+  /* Chat Shell Mobile Layout */
   .app {
     grid-template-columns: 1fr;
     transition: none;
