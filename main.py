@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -102,7 +102,6 @@ def log_user_data(user: User, workspace_context: str = "", user_text: str = "", 
             f"USER: {user.display_name or 'User'} ({user.email})",
         ]
 
-        # Only log workspace snapshot when it is new or changed, avoiding repeating 60+ lines on every message
         if workspace_context and workspace_context != "(Google account not linked)":
             prev_snapshot = _last_logged_workspace_snapshots.get(identifier)
             if prev_snapshot != workspace_context:
@@ -145,7 +144,6 @@ async def normalize_domain_middleware(request: Request, call_next):
         return RedirectResponse(str(normalized_url), status_code=status.HTTP_302_FOUND)
     return await call_next(request)
 
-# Set user context for live log routing to info_history/<email>.txt
 @app.middleware("http")
 async def user_logging_context_middleware(request: Request, call_next):
     global last_known_user_email
@@ -343,6 +341,32 @@ async def new_conversation(
     return {"id": conv.id, "title": conv.title}
 
 
+@app.delete("/api/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: int,
+    db:   AsyncSession = Depends(get_db),
+    user: User         = Depends(get_current_user),
+):
+    # Verify ownership before deletion
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conv_id,
+            Conversation.user_id == user.id,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete related messages first
+    await db.execute(
+        delete(Message).where(Message.conversation_id == conv_id)
+    )
+    # Delete conversation
+    await db.delete(conv)
+    await db.commit()
+
+    return {"status": "success", "deleted_id": conv_id}
 
 
 class SendMessageRequest(BaseModel):
@@ -446,11 +470,7 @@ Current UTC time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}
 
         loop = asyncio.get_event_loop()
 
-        # ── Model fallback chain ────────────────────────────────────
-        # Try the primary model first (with a few retries for transient
-        # 503 overload). If it's still down, drop to each fallback model
-        # in turn — lighter/older models often have separate capacity
-        # pools and stay up even when the flagship model is saturated.
+        # Model fallback chain
         models_to_try = [settings.gemini_model] + list(settings.gemini_fallback_models)
         RETRIES_PER_MODEL = 3
         BACKOFF_SECONDS = [1, 2, 4]
