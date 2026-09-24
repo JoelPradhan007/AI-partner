@@ -175,7 +175,7 @@ ul {
   color: var(--urgent);
 }
 
-/* ── LOGIN ────────────────────────────────────────────── */
+/* ── LOGIN (DESKTOP) ─────────────────────────────────── */
 .login-body {
   background: var(--bg-2);
 }
@@ -923,47 +923,79 @@ ul {
   }
 }
 
-/* ── MOBILE ONLY STYLES (Max 768px) ────────────────────── */
+/* ── MOBILE STYLES (Max 768px - Option B: Scaled Split) ─ */
 @media (max-width: 768px) {
-  /* Mobile Login Page Layout Fixes */
+  /* Mobile Login Page (Side-by-Side Scaled Layout) */
   .login-root {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     min-height: 100vh;
   }
 
   .login-left {
-    display: none;
+    display: flex !important;
+    padding: 20px 12px;
+  }
+
+  .login-left .wordmark {
+    margin-bottom: 24px;
+  }
+
+  .login-hero {
+    margin-bottom: 20px;
+  }
+
+  .login-hero h1 {
+    font-size: 16px;
+    line-height: 1.3;
+  }
+
+  .login-hero p {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .feature-list {
+    gap: 10px;
+  }
+
+  .feature-list li {
+    font-size: 10px;
+    gap: 6px;
+  }
+
+  .feature-list li svg {
+    width: 12px;
+    height: 12px;
   }
 
   .login-right {
-    padding: 32px 20px;
+    padding: 20px 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-  }
-
-  .login-card {
-    width: 100%;
-    max-width: 360px;
-    margin: 0 auto;
   }
 
   .login-card h2 {
-    font-size: 22px;
-    text-align: center;
+    font-size: 18px;
   }
 
   .login-card__sub {
-    font-size: 13.5px;
-    text-align: center;
-    margin-bottom: 28px;
+    font-size: 11px;
+    margin-bottom: 18px;
   }
 
   .btn-google {
-    padding: 14px;
-    font-size: 15px;
-    border-radius: var(--radius);
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .g-icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  .login-card__legal {
+    font-size: 9.5px;
   }
 
   /* Chat Shell Mobile Layout */
@@ -976,7 +1008,6 @@ ul {
     grid-template-columns: 1fr;
   }
 
-  /* Slide-over sidebar drawer */
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
@@ -993,7 +1024,6 @@ ul {
     opacity: 1 !important;
   }
 
-  /* Overlay backdrop */
   .sidebar-backdrop {
     display: none;
     position: fixed;
@@ -1032,10 +1062,9 @@ ul {
   }
 
   #msgInput {
-    font-size: 16px; /* Disables auto-zoom on iOS */
+    font-size: 16px;
   }
 
-  /* Hides composer keyboard shortcut hint on mobile screens */
   .composer__hint {
     display: none;
   }
